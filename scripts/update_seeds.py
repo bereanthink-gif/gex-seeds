@@ -258,7 +258,7 @@ def main() -> int:
         write_symbol_info(args.repo_name, underlyings)
         # Paste-ready strings for the strategies' "Paste String" GEX source:
         # one line per underlying, ZG,CW,PW,X1,X2 in underlying price terms.
-        lines = [f"{u}={lv['ZG']},{lv['CW']},{lv['PW']},{lv['X1']},{lv['X2']}"
+        lines = [f"{u}={lv['ZG']},{lv['CW']},{lv['PW']},{lv['X1']},{lv['X2']},{lv['GR']}"
                  for u, lv in results.items()]
         lines.append("# GR: " + " | ".join(f"{u} {lv['GR']}" for u, lv in results.items())
                      + f"  (updated {day.isoformat()})")
