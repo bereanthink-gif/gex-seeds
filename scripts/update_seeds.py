@@ -98,7 +98,8 @@ def fetch_chain(sym: str) -> dict:
         return json.loads(r.read().decode())
 
 
-def compute_levels(payload: dict, expiries: str = "all", band: float = 0.25) -> dict:
+def compute_levels(payload: dict, expiries: str = "all", band: float = 0.25,
+                   level_band: float = 0.05) -> dict:
     data = payload.get("data", {})
     options = data.get("options", [])
     spot = data.get("close") or data.get("current_price") or 0.0
@@ -173,11 +174,22 @@ def compute_levels(payload: dict, expiries: str = "all", band: float = 0.25) -> 
                 if abs(mid - spot) < best_d:
                     best_d, zero_gamma = abs(mid - spot), mid
 
-    call_wall = max(call_gex, key=call_gex.get) if call_gex else 0.0
-    put_wall = max(put_gex, key=put_gex.get) if put_gex else 0.0
+    # Walls and extra strikes must be TRADEABLE levels: rank only strikes
+    # within level_band of spot. Deep-OTM strikes carry huge OI (hedges,
+    # lottery tickets) and would otherwise win the ranking with levels that
+    # are useless intraday (e.g. an 800 "wall" with spot at 721).
+    lo_lv = spot * (1.0 - level_band) if spot else 0.0
+    hi_lv = spot * (1.0 + level_band) if spot else float("inf")
+    call_lv = {k: v for k, v in call_gex.items() if lo_lv <= k <= hi_lv} or call_gex
+    put_lv = {k: v for k, v in put_gex.items() if lo_lv <= k <= hi_lv} or put_gex
+    strikes_lv = sorted(set(call_lv) | set(put_lv))
+    net_lv = {k: call_lv.get(k, 0.0) - put_lv.get(k, 0.0) for k in strikes_lv}
 
-    pos_sorted = sorted((k for k in strikes if net[k] > 0), key=lambda k: net[k], reverse=True)
-    neg_sorted = sorted((k for k in strikes if net[k] < 0), key=lambda k: net[k])
+    call_wall = max(call_lv, key=call_lv.get) if call_lv else 0.0
+    put_wall = max(put_lv, key=put_lv.get) if put_lv else 0.0
+
+    pos_sorted = sorted((k for k in strikes_lv if net_lv[k] > 0), key=lambda k: net_lv[k], reverse=True)
+    neg_sorted = sorted((k for k in strikes_lv if net_lv[k] < 0), key=lambda k: net_lv[k])
     x1 = next((k for k in pos_sorted if k != call_wall), 0.0)
     x2 = next((k for k in neg_sorted if k != put_wall), 0.0)
 
@@ -230,6 +242,8 @@ def main() -> int:
     ap.add_argument("--expiries", choices=["all", "near"], default="all")
     ap.add_argument("--band", type=float, default=0.25,
                     help="only use strikes within this fraction of spot (default 0.25)")
+    ap.add_argument("--level-band", type=float, default=0.05,
+                    help="walls/extras must be within this fraction of spot (default 0.05)")
     ap.add_argument("--repo-name", default=REPO_ROOT.name,
                     help="Pine Seeds repo name (for symbol_info json filename)")
     ap.add_argument("--dry-run", action="store_true")
@@ -242,7 +256,7 @@ def main() -> int:
 
     for u in underlyings:
         try:
-            levels = compute_levels(fetch_chain(u), args.expiries, args.band)
+            levels = compute_levels(fetch_chain(u), args.expiries, args.band, args.level_band)
         except Exception as e:  # keep going: one bad chain shouldn't kill the rest
             print(f"[FAIL] {u}: {e}", file=sys.stderr)
             failures.append(u)
