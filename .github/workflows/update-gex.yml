@@ -2,11 +2,21 @@ name: Update GEX seed data
 
 on:
   schedule:
-    # 08:35 ET pre-market, both DST and standard time (the off-season run is
-    # harmless — it just rewrites the same day's row an hour early/late).
+    # 08:35 ET pre-market (AM pull -> levels.txt), both DST and standard time.
     - cron: "35 12 * * 1-5"
     - cron: "35 13 * * 1-5"
-  workflow_dispatch: {}
+    # 12:45 ET (PM pull -> levels_pm.txt) for the afternoon plan — the pre-market
+    # walls are stale by 1pm (spot moved, OI shifted, 0DTE gamma concentrated).
+    - cron: "45 16 * * 1-5"
+    - cron: "45 17 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      session:
+        description: "Which pull: am (levels.txt) or pm (levels_pm.txt)"
+        required: false
+        default: "am"
+        type: choice
+        options: [am, pm]
 
 permissions:
   contents: write
@@ -21,14 +31,29 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Decide AM vs PM output file
+        id: sess
+        run: |
+          # Manual dispatch passes session explicitly; cron infers it from the
+          # UTC hour (afternoon runs fire at 16:45/17:45 UTC -> hour >= 16).
+          SESSION="${{ github.event.inputs.session }}"
+          if [ -z "$SESSION" ]; then
+            H=$(date -u +%H)
+            if [ "$H" -ge 16 ]; then SESSION=pm; else SESSION=am; fi
+          fi
+          if [ "$SESSION" = "pm" ]; then OUT=levels_pm.txt; else OUT=levels.txt; fi
+          echo "out=$OUT" >> "$GITHUB_OUTPUT"
+          echo "Session=$SESSION -> $OUT"
+
       - name: Compute GEX levels and write seed CSVs
-        run: python scripts/update_seeds.py --symbols QQQ,SPY,GLD
+        run: python scripts/update_seeds.py --symbols QQQ,SPY,GLD --out ${{ steps.sess.outputs.out }}
 
       - name: Commit and push
         run: |
           git config user.name "gex-seeds-bot"
           git config user.email "actions@github.com"
           git add data symbol_info levels.txt
+          [ -f levels_pm.txt ] && git add levels_pm.txt || true
           git diff --cached --quiet && echo "No changes" && exit 0
-          git commit -m "GEX levels $(date -u +%F)"
+          git commit -m "GEX levels ${{ steps.sess.outputs.out }} $(date -u +%F)"
           git push

@@ -246,6 +246,9 @@ def main() -> int:
                     help="walls/extras must be within this fraction of spot (default 0.05)")
     ap.add_argument("--repo-name", default=REPO_ROOT.name,
                     help="Pine Seeds repo name (for symbol_info json filename)")
+    ap.add_argument("--out", default="levels.txt",
+                    help="paste-string output file (default levels.txt; use levels_pm.txt "
+                         "for the afternoon pull so the morning file isn't overwritten)")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
@@ -276,7 +279,7 @@ def main() -> int:
                  for u, lv in results.items()]
         lines.append("# GR: " + " | ".join(f"{u} {lv['GR']}" for u, lv in results.items())
                      + f"  (updated {day.isoformat()})")
-        (REPO_ROOT / "levels.txt").write_text("\n".join(lines) + "\n")
+        (REPO_ROOT / args.out).write_text("\n".join(lines) + "\n")
 
     return 1 if len(failures) == len(underlyings) else 0
 
