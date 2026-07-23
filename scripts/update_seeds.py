@@ -146,8 +146,16 @@ def compute_levels(payload: dict, expiries: str = "all", band: float = 0.25,
             exp = dt.datetime.strptime(m.group("date"), "%y%m%d").date()
         except ValueError:
             continue
-        t_years = (exp - today).days / 365.0
-        if t_years > 0 and iv > 0:
+        # 0DTE contracts used to vanish here: (exp - today).days == 0 made
+        # t_years exactly 0 and the t>0 test dropped same-day expiry from the
+        # flip calc entirely — the most concentrated gamma mass of the session
+        # (and the very thing the PM pull exists to capture). Same-day expiry
+        # now enters with ~a quarter trading day of time value. Measured ZG
+        # effect when found (2026-07-23): ~0.7 SPY pts / ~0.06 QQQ pts — small
+        # but systematic, and largest exactly when 0DTE OI concentrates.
+        days_to_exp = (exp - today).days
+        if days_to_exp >= 0 and iv > 0:
+            t_years = max(days_to_exp, 0.25) / 365.0
             contracts.append((strike, t_years, iv, 1 if is_call else -1, oi))
 
     strikes = sorted(set(call_gex) | set(put_gex))
